@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Claude Flow
+.claude-flow/
+
 # Build output (rebuilt on install)
 dist/
 
