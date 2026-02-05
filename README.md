@@ -42,7 +42,7 @@ The adapter is a transparent stdio proxy. It:
 If you're already using Claude Code, simply ask it:
 
 ```
-Install Tailwind CSS LSP support following https://github.com/maxcommerce/tailwind-lsp-adapter
+Install Tailwind CSS LSP support following https://github.com/CommerceMax/tailwind-lsp-adapter
 ```
 
 Claude will read the instructions and configure everything automatically.
