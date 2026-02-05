@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output (rebuilt on install)
+dist/
+
+# Debug logs
+*.log
+tailwind-lsp-adapter-*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# npm
+.npm
+*.tgz
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Temporary files
+tmp/
+temp/

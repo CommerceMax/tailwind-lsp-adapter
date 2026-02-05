@@ -1,0 +1,22 @@
+{
+  "tailwindcss": {
+    "command": "tailwind-lsp-adapter",
+    "extensionToLanguage": {
+      ".css": "css",
+      ".scss": "scss",
+      ".less": "less",
+      ".html": "html",
+      ".jsx": "javascriptreact",
+      ".tsx": "typescriptreact",
+      ".vue": "vue",
+      ".svelte": "svelte",
+      ".astro": "astro",
+      ".php": "php",
+      ".blade.php": "blade",
+      ".erb": "erb",
+      ".ejs": "ejs",
+      ".hbs": "handlebars",
+      ".twig": "twig"
+    }
+  }
+}

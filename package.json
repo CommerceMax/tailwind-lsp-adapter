@@ -1,0 +1,56 @@
+{
+  "name": "tailwind-lsp-adapter",
+  "version": "1.0.0",
+  "description": "LSP adapter for @tailwindcss/language-server enabling Claude Code compatibility",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "tailwind-lsp-adapter": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "tailwindcss",
+    "lsp",
+    "language-server",
+    "claude-code",
+    "adapter",
+    "proxy",
+    "mcp",
+    "vscode"
+  ],
+  "author": "MaxCommerce",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CommerceMax/tailwind-lsp-adapter.git"
+  },
+  "homepage": "https://github.com/CommerceMax/tailwind-lsp-adapter#readme",
+  "bugs": {
+    "url": "https://github.com/CommerceMax/tailwind-lsp-adapter/issues"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "plugin/"
+  ]
+}

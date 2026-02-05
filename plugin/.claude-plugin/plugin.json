@@ -1,0 +1,11 @@
+{
+  "name": "tailwind-lsp-adapter",
+  "description": "Tailwind CSS language support via tailwind-lsp-adapter",
+  "version": "1.0.0",
+  "author": {
+    "name": "MaxCommerce"
+  },
+  "repository": "https://github.com/maxcommerce/tailwind-lsp-adapter",
+  "license": "MIT",
+  "keywords": ["tailwindcss", "lsp", "css", "language-server"]
+}
