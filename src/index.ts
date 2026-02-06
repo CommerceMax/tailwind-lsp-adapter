@@ -999,32 +999,40 @@ function main(): void {
 // ---------------------------------------------------------------------------
 
 interface SetupPaths {
-  pluginDir: string;
-  pluginJsonDir: string;
-  pluginJson: string;
-  lspJson: string;
-  marketplaceDir: string;
-  marketplaceJson: string;
-  claudeSettingsDir: string;
-  claudeSettings: string;
+  // Base directories
+  claudePluginsDir: string;
+  marketplaceDir: string;       // ~/.claude/plugins/local-plugins
+  marketplaceConfigDir: string; // ~/.claude/plugins/local-plugins/.claude-plugin
+  marketplaceJson: string;      // ~/.claude/plugins/local-plugins/.claude-plugin/marketplace.json
+
+  // Plugin directories (inside marketplace)
+  pluginDir: string;            // ~/.claude/plugins/local-plugins/tailwind-lsp-adapter
+  pluginConfigDir: string;      // ~/.claude/plugins/local-plugins/tailwind-lsp-adapter/.claude-plugin
+  pluginJson: string;           // ~/.claude/plugins/local-plugins/tailwind-lsp-adapter/.claude-plugin/plugin.json
+  lspJson: string;              // ~/.claude/plugins/local-plugins/tailwind-lsp-adapter/.lsp.json
+
+  // Known marketplaces file
+  knownMarketplacesJson: string; // ~/.claude/plugins/known_marketplaces.json
 }
 
 function getSetupPaths(): SetupPaths {
   const homeDir = os.homedir();
-  const pluginDir = resolve(homeDir, ".claude/plugins/tailwind-lsp-adapter");
-  const pluginJsonDir = resolve(pluginDir, ".claude-plugin");
-  const marketplaceDir = resolve(homeDir, ".claude/plugins/.claude-plugin");
-  const claudeSettingsDir = resolve(homeDir, ".claude");
+  const claudePluginsDir = resolve(homeDir, ".claude/plugins");
+  const marketplaceDir = resolve(claudePluginsDir, "local-plugins");
+  const marketplaceConfigDir = resolve(marketplaceDir, ".claude-plugin");
+  const pluginDir = resolve(marketplaceDir, "tailwind-lsp-adapter");
+  const pluginConfigDir = resolve(pluginDir, ".claude-plugin");
 
   return {
-    pluginDir,
-    pluginJsonDir,
-    pluginJson: resolve(pluginJsonDir, "plugin.json"),
-    lspJson: resolve(pluginDir, ".lsp.json"),
+    claudePluginsDir,
     marketplaceDir,
-    marketplaceJson: resolve(marketplaceDir, "marketplace.json"),
-    claudeSettingsDir,
-    claudeSettings: resolve(claudeSettingsDir, "settings.json"),
+    marketplaceConfigDir,
+    marketplaceJson: resolve(marketplaceConfigDir, "marketplace.json"),
+    pluginDir,
+    pluginConfigDir,
+    pluginJson: resolve(pluginConfigDir, "plugin.json"),
+    lspJson: resolve(pluginDir, ".lsp.json"),
+    knownMarketplacesJson: resolve(claudePluginsDir, "known_marketplaces.json"),
   };
 }
 
@@ -1043,27 +1051,17 @@ function writeJsonFile(filePath: string, data: object, _description: string): vo
 
 function createPluginJson(paths: SetupPaths): void {
   console.log("\n[1/4] Creating plugin.json...");
-  ensureDirectory(paths.pluginJsonDir);
+  ensureDirectory(paths.pluginConfigDir);
 
+  // plugin.json must be minimal - only name, version, description, author
+  // All other keys (category, strict, lspServers, etc.) go in marketplace.json
   const pluginJson = {
     name: "tailwind-lsp-adapter",
     version: "1.0.0",
-    description: "Tailwind CSS LSP Adapter for Claude Code - provides intelligent CSS completions, hover info, and diagnostics",
-    author: "Tailwind LSP Adapter",
-    homepage: "https://github.com/tailwindlabs/tailwindcss-intellisense",
-    keywords: ["tailwind", "css", "lsp", "completion", "intellisense"],
-    license: "MIT",
-    engines: {
-      claude: ">=1.0.0",
-    },
-    contributes: {
-      lspServers: [
-        {
-          id: "tailwindcss",
-          name: "Tailwind CSS Language Server",
-          languages: ["css", "scss", "less", "html", "javascript", "javascriptreact", "typescript", "typescriptreact", "vue", "svelte"],
-        },
-      ],
+    description: "Tailwind CSS LSP Adapter for Claude Code - provides diagnostics and hover for Tailwind classes",
+    author: {
+      name: "CommerceMax",
+      email: "local@localhost",
     },
   };
 
@@ -1127,11 +1125,41 @@ function createLspJson(paths: SetupPaths): void {
   writeJsonFile(paths.lspJson, lspJson, ".lsp.json");
 }
 
+interface MarketplacePlugin {
+  name: string;
+  description: string;
+  version: string;
+  author?: { name: string; email: string };
+  source: string;
+  category?: string;
+  strict?: boolean;
+  lspServers?: Record<string, {
+    command: string;
+    args: string[];
+    extensionToLanguage: Record<string, string>;
+  }>;
+}
+
+interface MarketplaceJson {
+  $schema: string;
+  name: string;
+  description: string;
+  owner: { name: string; email: string };
+  plugins: MarketplacePlugin[];
+}
+
 function createOrUpdateMarketplaceJson(paths: SetupPaths): void {
   console.log("\n[3/4] Creating/updating marketplace.json...");
-  ensureDirectory(paths.marketplaceDir);
+  ensureDirectory(paths.marketplaceConfigDir);
 
-  let marketplace: { plugins: Array<{ name: string; version: string; path: string; enabled: boolean }> } = {
+  let marketplace: MarketplaceJson = {
+    $schema: "https://anthropic.com/claude-code/marketplace.schema.json",
+    name: "local-plugins",
+    description: "Local plugin marketplace for custom extensions",
+    owner: {
+      name: "Local",
+      email: "local@localhost",
+    },
     plugins: [],
   };
 
@@ -1139,7 +1167,7 @@ function createOrUpdateMarketplaceJson(paths: SetupPaths): void {
   if (fs.existsSync(paths.marketplaceJson)) {
     try {
       const existing = JSON.parse(fs.readFileSync(paths.marketplaceJson, "utf-8"));
-      if (existing && Array.isArray(existing.plugins)) {
+      if (existing && existing.$schema && Array.isArray(existing.plugins)) {
         marketplace = existing;
       }
     } catch {
@@ -1152,11 +1180,35 @@ function createOrUpdateMarketplaceJson(paths: SetupPaths): void {
     (p) => p.name === "tailwind-lsp-adapter"
   );
 
-  const pluginEntry = {
+  const pluginEntry: MarketplacePlugin = {
     name: "tailwind-lsp-adapter",
+    description: "Tailwind CSS LSP Adapter for Claude Code - provides intelligent CSS completions, hover info, and diagnostics",
     version: "1.0.0",
-    path: paths.pluginDir,
-    enabled: true,
+    author: {
+      name: "Tailwind LSP Adapter",
+      email: "local@localhost",
+    },
+    source: "./tailwind-lsp-adapter",
+    category: "development",
+    strict: false,
+    lspServers: {
+      tailwindcss: {
+        command: "tailwind-lsp-adapter",
+        args: [],
+        extensionToLanguage: {
+          ".css": "css",
+          ".scss": "scss",
+          ".less": "less",
+          ".html": "html",
+          ".js": "javascript",
+          ".jsx": "javascriptreact",
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".vue": "vue",
+          ".svelte": "svelte",
+        },
+      },
+    },
   };
 
   if (existingIndex >= 0) {
@@ -1170,55 +1222,63 @@ function createOrUpdateMarketplaceJson(paths: SetupPaths): void {
   writeJsonFile(paths.marketplaceJson, marketplace, "marketplace.json");
 }
 
-function updateClaudeSettings(paths: SetupPaths): void {
-  console.log("\n[4/4] Updating Claude settings.json...");
-  ensureDirectory(paths.claudeSettingsDir);
+interface KnownMarketplaceEntry {
+  source: {
+    source: string;
+    path?: string;
+    repo?: string;
+  };
+  installLocation: string;
+  lastUpdated: string;
+}
 
-  let settings: Record<string, unknown> = {};
+function updateKnownMarketplaces(paths: SetupPaths): void {
+  console.log("\n[4/4] Updating known_marketplaces.json...");
+  ensureDirectory(paths.claudePluginsDir);
 
-  // Read existing settings.json if it exists
-  if (fs.existsSync(paths.claudeSettings)) {
+  let knownMarketplaces: Record<string, KnownMarketplaceEntry> = {};
+
+  // Read existing known_marketplaces.json if it exists
+  if (fs.existsSync(paths.knownMarketplacesJson)) {
     try {
-      settings = JSON.parse(fs.readFileSync(paths.claudeSettings, "utf-8"));
+      knownMarketplaces = JSON.parse(fs.readFileSync(paths.knownMarketplacesJson, "utf-8"));
     } catch {
-      console.log("  Warning: Could not parse existing settings.json, creating new one");
-      settings = {};
+      console.log("  Warning: Could not parse existing known_marketplaces.json, creating new one");
+      knownMarketplaces = {};
     }
   }
 
-  // Add or update extraKnownMarketplaces (must be a record, not an array)
   const marketplaceName = "local-plugins";
-  const marketplacePath = resolve(os.homedir(), ".claude/plugins");
 
-  // Ensure extraKnownMarketplaces is an object (not array)
-  let extraMarketplaces = settings.extraKnownMarketplaces as Record<string, unknown> | undefined;
-
-  if (!extraMarketplaces || typeof extraMarketplaces !== "object" || Array.isArray(extraMarketplaces)) {
-    extraMarketplaces = {};
-  }
-
-  const marketplaceEntry = {
+  const marketplaceEntry: KnownMarketplaceEntry = {
     source: {
       source: "directory",
-      path: marketplacePath,
+      path: paths.marketplaceDir,
     },
+    installLocation: paths.marketplaceDir,
+    lastUpdated: new Date().toISOString(),
   };
 
-  if (extraMarketplaces[marketplaceName]) {
+  if (knownMarketplaces[marketplaceName]) {
     console.log("  Updated existing local-plugins marketplace entry");
   } else {
-    console.log("  Added local-plugins to extraKnownMarketplaces");
+    console.log("  Added local-plugins to known_marketplaces.json");
   }
 
-  extraMarketplaces[marketplaceName] = marketplaceEntry;
-  settings.extraKnownMarketplaces = extraMarketplaces;
-  writeJsonFile(paths.claudeSettings, settings, "settings.json");
+  knownMarketplaces[marketplaceName] = marketplaceEntry;
+  writeJsonFile(paths.knownMarketplacesJson, knownMarketplaces, "known_marketplaces.json");
 }
 
 function printInstructions(): void {
+  const homeDir = os.homedir();
   console.log("\n" + "=".repeat(60));
   console.log("Setup Complete!");
   console.log("=".repeat(60));
+  console.log("\nCreated files:");
+  console.log(`  - ${homeDir}/.claude/plugins/local-plugins/.claude-plugin/marketplace.json`);
+  console.log(`  - ${homeDir}/.claude/plugins/local-plugins/tailwind-lsp-adapter/.claude-plugin/plugin.json`);
+  console.log(`  - ${homeDir}/.claude/plugins/local-plugins/tailwind-lsp-adapter/.lsp.json`);
+  console.log(`  - ${homeDir}/.claude/plugins/known_marketplaces.json (updated)`);
   console.log("\nNext steps:");
   console.log("\n1. Enable LSP tools in Claude Code by setting the environment variable:");
   console.log("   export ENABLE_LSP_TOOL=1");
@@ -1245,7 +1305,7 @@ function runSetup(): void {
     createPluginJson(paths);
     createLspJson(paths);
     createOrUpdateMarketplaceJson(paths);
-    updateClaudeSettings(paths);
+    updateKnownMarketplaces(paths);
     printInstructions();
     process.exit(0);
   } catch (err) {
