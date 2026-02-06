@@ -1072,52 +1072,22 @@ function createLspJson(paths: SetupPaths): void {
   console.log("\n[2/4] Creating .lsp.json...");
   ensureDirectory(paths.pluginDir);
 
+  // Claude Code format: uses extensionToLanguage mapping (NOT filetypes array)
   const lspJson = {
-    servers: {
-      tailwindcss: {
-        command: "tailwind-lsp-adapter",
-        args: [],
-        filetypes: [
-          "css",
-          "scss",
-          "less",
-          "html",
-          "javascript",
-          "javascriptreact",
-          "typescript",
-          "typescriptreact",
-          "vue",
-          "svelte",
-        ],
-        rootPatterns: [
-          "tailwind.config.js",
-          "tailwind.config.ts",
-          "tailwind.config.cjs",
-          "tailwind.config.mjs",
-          "postcss.config.js",
-          "postcss.config.ts",
-          "postcss.config.cjs",
-          "postcss.config.mjs",
-          "package.json",
-        ],
-        initializationOptions: {},
-        settings: {
-          tailwindCSS: {
-            emmetCompletions: false,
-            classAttributes: ["class", "className", "ngClass"],
-            lint: {
-              cssConflict: "warning",
-              invalidApply: "error",
-              invalidScreen: "error",
-              invalidVariant: "error",
-              invalidConfigPath: "error",
-              invalidTailwindDirective: "error",
-              recommendedVariantOrder: "warning",
-            },
-            showPixelEquivalents: true,
-            rootFontSize: 16,
-          },
-        },
+    tailwindcss: {
+      command: "tailwind-lsp-adapter",
+      args: [],
+      extensionToLanguage: {
+        ".css": "css",
+        ".scss": "scss",
+        ".less": "less",
+        ".html": "html",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".vue": "vue",
+        ".svelte": "svelte",
       },
     },
   };
