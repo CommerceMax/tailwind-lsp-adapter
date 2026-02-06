@@ -1013,6 +1013,9 @@ interface SetupPaths {
 
   // Known marketplaces file
   knownMarketplacesJson: string; // ~/.claude/plugins/known_marketplaces.json
+
+  // Cache directory (needs to be cleared on updates)
+  cacheDir: string;             // ~/.claude/plugins/cache/local-plugins/tailwind-lsp-adapter
 }
 
 function getSetupPaths(): SetupPaths {
@@ -1022,6 +1025,7 @@ function getSetupPaths(): SetupPaths {
   const marketplaceConfigDir = resolve(marketplaceDir, ".claude-plugin");
   const pluginDir = resolve(marketplaceDir, "tailwind-lsp-adapter");
   const pluginConfigDir = resolve(pluginDir, ".claude-plugin");
+  const cacheDir = resolve(claudePluginsDir, "cache/local-plugins/tailwind-lsp-adapter");
 
   return {
     claudePluginsDir,
@@ -1033,6 +1037,7 @@ function getSetupPaths(): SetupPaths {
     pluginJson: resolve(pluginConfigDir, "plugin.json"),
     lspJson: resolve(pluginDir, ".lsp.json"),
     knownMarketplacesJson: resolve(claudePluginsDir, "known_marketplaces.json"),
+    cacheDir,
   };
 }
 
@@ -1040,6 +1045,14 @@ function ensureDirectory(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true, mode: 0o755 });
     console.log(`  Created directory: ${dirPath}`);
+  }
+}
+
+function clearStaleCache(paths: SetupPaths): void {
+  if (fs.existsSync(paths.cacheDir)) {
+    console.log("\n[0/4] Clearing stale cache...");
+    fs.rmSync(paths.cacheDir, { recursive: true, force: true });
+    console.log(`  Removed: ${paths.cacheDir}`);
   }
 }
 
@@ -1272,6 +1285,8 @@ function runSetup(): void {
   const paths = getSetupPaths();
 
   try {
+    // Clear stale cache first to ensure fresh config is used
+    clearStaleCache(paths);
     createPluginJson(paths);
     createLspJson(paths);
     createOrUpdateMarketplaceJson(paths);

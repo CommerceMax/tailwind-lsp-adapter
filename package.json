@@ -1,6 +1,6 @@
 {
   "name": "tailwind-lsp-adapter",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "LSP adapter for @tailwindcss/language-server enabling Claude Code compatibility",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
