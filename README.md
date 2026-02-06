@@ -246,7 +246,7 @@ The adapter sits between Claude Code and the Tailwind CSS Language Server as a t
 ## Building from Source
 
 ```bash
-git clone https://github.com/maxcommerce/tailwind-lsp-adapter.git
+git clone https://github.com/CommerceMax/tailwind-lsp-adapter.git
 cd tailwind-lsp-adapter
 npm install
 npm run build

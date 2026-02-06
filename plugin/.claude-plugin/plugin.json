@@ -5,7 +5,7 @@
   "author": {
     "name": "MaxCommerce"
   },
-  "repository": "https://github.com/maxcommerce/tailwind-lsp-adapter",
+  "repository": "https://github.com/CommerceMax/tailwind-lsp-adapter",
   "license": "MIT",
   "keywords": ["tailwindcss", "lsp", "css", "language-server"]
 }
