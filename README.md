@@ -37,42 +37,39 @@ The adapter is a transparent stdio proxy. It:
 
 ## Installation
 
-### Quick Setup with Claude Code
-
-If you're already using Claude Code, simply ask it:
-
-```
-Install Tailwind CSS LSP support following https://github.com/CommerceMax/tailwind-lsp-adapter
-```
-
-Claude will read the instructions and configure everything automatically.
-
-### Prerequisites
-
-- Node.js 18 or later
-- @tailwindcss/language-server
+### Quick Install (Recommended)
 
 ```bash
-# Install the Tailwind CSS language server
-npm install -g @tailwindcss/language-server
+# 1. Install dependencies
+npm install -g @tailwindcss/language-server tailwind-lsp-adapter
 
-# Install the adapter
-npm install -g tailwind-lsp-adapter
+# 2. Run automated setup
+tailwind-lsp-adapter --setup
+
+# 3. Enable LSP tools (add to ~/.zshrc or ~/.bashrc)
+echo 'export ENABLE_LSP_TOOL=1' >> ~/.zshrc
+source ~/.zshrc
+
+# 4. Restart Claude Code and install the plugin
+#    In Claude Code, run:
+#    /plugin install tailwind-lsp-adapter@local-plugins
 ```
 
-> **Note:** Ensure the npm global bin directory is in your PATH:
-> - **macOS/Linux:** Usually `~/.npm-global/bin` or check with `npm config get prefix`
-> - **Windows:** Usually `%APPDATA%\npm`
+The `--setup` command automatically:
+- Creates the plugin structure in `~/.claude/plugins/`
+- Registers the local marketplace
+- Updates Claude Code settings
 
-### Manual Plugin Configuration
+### Manual Installation
+
+<details>
+<summary>Click to expand manual installation steps</summary>
 
 **Step 1.** Create the plugin structure:
 
 ```bash
-# Create plugin directory
 mkdir -p ~/.claude/plugins/tailwind-lsp-adapter/.claude-plugin
 
-# Create plugin.json
 cat > ~/.claude/plugins/tailwind-lsp-adapter/.claude-plugin/plugin.json << 'EOF'
 {
   "name": "tailwind-lsp-adapter",
@@ -81,7 +78,6 @@ cat > ~/.claude/plugins/tailwind-lsp-adapter/.claude-plugin/plugin.json << 'EOF'
 }
 EOF
 
-# Create .lsp.json
 cat > ~/.claude/plugins/tailwind-lsp-adapter/.lsp.json << 'EOF'
 {
   "tailwindcss": {
@@ -105,10 +101,8 @@ EOF
 **Step 2.** Register the plugin in a local marketplace:
 
 ```bash
-# Create marketplace directory
 mkdir -p ~/.claude/plugins/.claude-plugin
 
-# Create marketplace.json
 cat > ~/.claude/plugins/.claude-plugin/marketplace.json << 'EOF'
 {
   "name": "local-plugins",
@@ -145,14 +139,14 @@ EOF
 /plugin install tailwind-lsp-adapter@local-plugins
 ```
 
-**Step 5.** Enable LSP tools (if not already enabled) and restart Claude Code:
+**Step 5.** Enable LSP tools and restart:
 
-**macOS/Linux** — Add to `~/.bashrc` or `~/.zshrc`:
 ```bash
-export ENABLE_LSP_TOOL=1
+echo 'export ENABLE_LSP_TOOL=1' >> ~/.zshrc
+source ~/.zshrc
 ```
 
-Then restart your terminal or run `source ~/.zshrc`.
+</details>
 
 ## Configuration
 
@@ -193,10 +187,20 @@ Once installed, Claude Code gains Tailwind CSS intelligence:
 
 - **Diagnostics** — errors and warnings after edits (invalid classes, conflicting utilities)
 - **Hover** — full CSS output preview for Tailwind classes
-- **Completions** — class name suggestions based on your tailwind config
-- **Color decorators** — color information for Tailwind color classes
-- **Code Actions** — quick fixes for Tailwind-specific issues
-- **Go to Definition** — navigate to where classes/theme values are defined
+
+## Limitations
+
+Claude Code's LSP client has limited protocol support compared to full IDEs like VS Code. The following features are **not available** even with this adapter:
+
+| Feature | Status | Reason |
+|---------|--------|--------|
+| Completions | Not supported | Claude Code doesn't request completions from LSP servers |
+| Color decorators | Not supported | Claude Code doesn't process `textDocument/documentColor` |
+| Code Actions | Not supported | Claude Code doesn't request code actions |
+| Go to Definition | Not supported | Claude Code doesn't use `textDocument/definition` |
+| Document Links | Not supported | Claude Code doesn't process document links |
+
+This adapter enables the Tailwind CSS Language Server to **initialize successfully** and provide the features that Claude Code does support (diagnostics and hover). For full Tailwind CSS IntelliSense, use VS Code or another editor with complete LSP support.
 
 ## Tailwind CSS v4 Support
 

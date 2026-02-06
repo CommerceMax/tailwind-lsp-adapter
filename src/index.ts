@@ -263,6 +263,14 @@ function encodeMessage(msg: JsonRpcMessage): Buffer {
 /** Registered capabilities (tracked for potential future use) */
 const registeredCapabilities: Map<string, any> = new Map();
 
+/** Track pending requests to correlate responses with their original requests */
+interface PendingRequest {
+  method: string;
+  timestamp: number;
+  context?: string;
+}
+const pendingRequests: Map<number | string, PendingRequest> = new Map();
+
 /**
  * Handle `client/registerCapability` — the server wants to dynamically
  * register capabilities. We accept them silently and respond with success.
@@ -369,6 +377,301 @@ function handleWindowShowMessage(msg: JsonRpcMessage): null {
 }
 
 // ---------------------------------------------------------------------------
+// Formatting and Rename request logging
+// ---------------------------------------------------------------------------
+
+/**
+ * Log formatting request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logFormattingRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const options = msg.params?.options || {};
+  log(
+    "FORMAT",
+    `textDocument/formatting for ${uri} (tabSize: ${options.tabSize}, insertSpaces: ${options.insertSpaces})`
+  );
+}
+
+/**
+ * Log range formatting request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logRangeFormattingRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const range = msg.params?.range;
+  if (range) {
+    log(
+      "FORMAT",
+      `textDocument/rangeFormatting for ${uri} (${range.start.line}:${range.start.character} to ${range.end.line}:${range.end.character})`
+    );
+  } else {
+    log("FORMAT", `textDocument/rangeFormatting for ${uri} (no range)`);
+  }
+}
+
+/**
+ * Log prepare rename request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logPrepareRenameRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const position = msg.params?.position;
+  if (position) {
+    log(
+      "RENAME",
+      `textDocument/prepareRename at ${uri}:${position.line}:${position.character}`
+    );
+  } else {
+    log("RENAME", `textDocument/prepareRename for ${uri} (no position)`);
+  }
+}
+
+/**
+ * Log rename request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logRenameRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const position = msg.params?.position;
+  const newName = msg.params?.newName || "(unknown)";
+  if (position) {
+    log(
+      "RENAME",
+      `textDocument/rename at ${uri}:${position.line}:${position.character} -> "${newName}"`
+    );
+  } else {
+    log("RENAME", `textDocument/rename for ${uri} -> "${newName}"`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Completion request logging
+// ---------------------------------------------------------------------------
+
+/**
+ * Log textDocument/completion request details for debugging.
+ * Tracks the request for correlating with the response.
+ */
+function logCompletionRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const position = msg.params?.position;
+  const context = msg.params?.context;
+
+  let logMsg = `textDocument/completion id=${msg.id} uri=${uri}`;
+  if (position) {
+    logMsg += ` line=${position.line} char=${position.character}`;
+  }
+  if (context?.triggerKind) {
+    const triggerKinds = ["", "Invoked", "TriggerCharacter", "TriggerForIncompleteCompletions"];
+    logMsg += ` trigger=${triggerKinds[context.triggerKind] || context.triggerKind}`;
+    if (context.triggerCharacter) {
+      logMsg += ` char="${context.triggerCharacter}"`;
+    }
+  }
+
+  log("COMPLETION", logMsg);
+
+  // Track the request for response correlation
+  if (msg.id !== undefined) {
+    pendingRequests.set(msg.id, {
+      method: "textDocument/completion",
+      timestamp: Date.now(),
+      context: uri,
+    });
+  }
+}
+
+/**
+ * Log completionItem/resolve request details for debugging.
+ * This is called when the client wants more details about a completion item.
+ */
+function logCompletionResolveRequest(msg: JsonRpcMessage): void {
+  const label = msg.params?.label || "(unknown)";
+  const kind = msg.params?.kind;
+  const kindNames = [
+    "", "Text", "Method", "Function", "Constructor", "Field", "Variable",
+    "Class", "Interface", "Module", "Property", "Unit", "Value", "Enum",
+    "Keyword", "Snippet", "Color", "File", "Reference", "Folder",
+    "EnumMember", "Constant", "Struct", "Event", "Operator", "TypeParameter"
+  ];
+
+  let logMsg = `completionItem/resolve id=${msg.id} label="${label}"`;
+  if (kind && kindNames[kind]) {
+    logMsg += ` kind=${kindNames[kind]}`;
+  }
+
+  log("COMPLETION", logMsg);
+
+  // Track the request for response correlation
+  if (msg.id !== undefined) {
+    pendingRequests.set(msg.id, {
+      method: "completionItem/resolve",
+      timestamp: Date.now(),
+      context: label,
+    });
+  }
+}
+
+/**
+ * Log completion response details for debugging.
+ * Called when we receive a response to a completion request.
+ */
+function logCompletionResponse(msg: JsonRpcMessage, pending: PendingRequest): void {
+  const elapsed = Date.now() - pending.timestamp;
+
+  if (msg.error) {
+    log("COMPLETION", `Response id=${msg.id} ERROR: ${msg.error.code} - ${msg.error.message} (${elapsed}ms)`);
+    return;
+  }
+
+  if (pending.method === "textDocument/completion") {
+    // Response can be CompletionItem[] or CompletionList
+    let itemCount = 0;
+    let isIncomplete = false;
+
+    if (Array.isArray(msg.result)) {
+      itemCount = msg.result.length;
+    } else if (msg.result && typeof msg.result === "object") {
+      itemCount = msg.result.items?.length || 0;
+      isIncomplete = msg.result.isIncomplete || false;
+    }
+
+    log("COMPLETION", `Response id=${msg.id} items=${itemCount} incomplete=${isIncomplete} (${elapsed}ms)`);
+
+    // Log first few items for debugging (only if we have items)
+    if (itemCount > 0 && Array.isArray(msg.result)) {
+      const labels = msg.result.slice(0, 5).map((i: any) => i.label).join(", ");
+      log("COMPLETION", `  First items: ${labels}${itemCount > 5 ? ", ..." : ""}`);
+    } else if (itemCount > 0 && msg.result?.items) {
+      const labels = msg.result.items.slice(0, 5).map((i: any) => i.label).join(", ");
+      log("COMPLETION", `  First items: ${labels}${itemCount > 5 ? ", ..." : ""}`);
+    }
+  } else if (pending.method === "completionItem/resolve") {
+    const label = msg.result?.label || pending.context;
+    const hasDocumentation = !!(msg.result?.documentation);
+    const hasDetail = !!(msg.result?.detail);
+
+    log("COMPLETION", `Resolve id=${msg.id} label="${label}" hasDoc=${hasDocumentation} hasDetail=${hasDetail} (${elapsed}ms)`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Code Action request logging
+// ---------------------------------------------------------------------------
+
+/**
+ * Log code action request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logCodeActionRequest(msg: JsonRpcMessage): void {
+  const uri = msg.params?.textDocument?.uri || "(unknown)";
+  const range = msg.params?.range;
+  const context = msg.params?.context;
+  const diagnosticsCount = context?.diagnostics?.length || 0;
+  const requestedKinds = context?.only?.join(", ") || "all";
+
+  let logMsg = `textDocument/codeAction id=${msg.id} uri=${uri}`;
+  if (range) {
+    logMsg += ` range=${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
+  }
+  logMsg += ` diagnostics=${diagnosticsCount} kinds=${requestedKinds}`;
+
+  log("CODE-ACTION", logMsg);
+
+  // Track the request for response correlation
+  if (msg.id !== undefined) {
+    pendingRequests.set(msg.id, {
+      method: "textDocument/codeAction",
+      timestamp: Date.now(),
+      context: uri,
+    });
+  }
+}
+
+/**
+ * Log code action resolve request details for debugging.
+ * These requests are forwarded to the server without modification.
+ */
+function logCodeActionResolveRequest(msg: JsonRpcMessage): void {
+  const title = msg.params?.title || "(unknown)";
+  const kind = msg.params?.kind || "(unknown)";
+  const isPreferred = msg.params?.isPreferred ? " [preferred]" : "";
+
+  log("CODE-ACTION", `codeAction/resolve id=${msg.id} title="${title}" kind=${kind}${isPreferred}`);
+
+  // Track the request for response correlation
+  if (msg.id !== undefined) {
+    pendingRequests.set(msg.id, {
+      method: "codeAction/resolve",
+      timestamp: Date.now(),
+      context: title,
+    });
+  }
+}
+
+/**
+ * Log code action response details for debugging.
+ */
+function logCodeActionResponse(msg: JsonRpcMessage, pending: PendingRequest): void {
+  const elapsed = Date.now() - pending.timestamp;
+
+  if (msg.error) {
+    log("CODE-ACTION", `Response id=${msg.id} ERROR: ${msg.error.code} - ${msg.error.message} (${elapsed}ms)`);
+    return;
+  }
+
+  if (pending.method === "codeAction/resolve") {
+    // Resolved code action response
+    if (msg.result) {
+      const hasEdit = msg.result.edit ? "edit=yes" : "edit=no";
+      const hasCommand = msg.result.command ? "command=yes" : "command=no";
+      log("CODE-ACTION", `Resolve id=${msg.id} title="${pending.context}" ${hasEdit} ${hasCommand} (${elapsed}ms)`);
+    } else {
+      log("CODE-ACTION", `Resolve id=${msg.id} title="${pending.context}" result=null (${elapsed}ms)`);
+    }
+    return;
+  }
+
+  // textDocument/codeAction response
+  if (msg.result === null) {
+    log("CODE-ACTION", `Response id=${msg.id} result=null (no code actions) (${elapsed}ms)`);
+    return;
+  }
+
+  if (Array.isArray(msg.result)) {
+    const actions = msg.result;
+    const actionCount = actions.length;
+
+    if (actionCount === 0) {
+      log("CODE-ACTION", `Response id=${msg.id} actions=0 (${elapsed}ms)`);
+      return;
+    }
+
+    // Summarize the code actions
+    const kinds = actions
+      .map((a: any) => a.kind || "unknown")
+      .filter((v: string, i: number, arr: string[]) => arr.indexOf(v) === i);
+    const preferredCount = actions.filter((a: any) => a.isPreferred).length;
+
+    log("CODE-ACTION", `Response id=${msg.id} actions=${actionCount} kinds=[${kinds.join(", ")}] preferred=${preferredCount} (${elapsed}ms)`);
+
+    // Log individual actions (first 5)
+    actions.slice(0, 5).forEach((action: any, idx: number) => {
+      const title = action.title || "(no title)";
+      const kind = action.kind || "unknown";
+      const preferred = action.isPreferred ? " [preferred]" : "";
+      const disabled = action.disabled ? ` [disabled: ${action.disabled.reason}]` : "";
+      log("CODE-ACTION", `  [${idx + 1}] "${title}" (${kind})${preferred}${disabled}`);
+    });
+
+    if (actionCount > 5) {
+      log("CODE-ACTION", `  ... and ${actionCount - 5} more action(s)`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Initialize request patching
 // ---------------------------------------------------------------------------
 
@@ -442,10 +745,54 @@ function patchInitializeRequest(msg: JsonRpcMessage): JsonRpcMessage {
   textDocument.codeAction = {
     ...textDocument.codeAction,
     dynamicRegistration: true,
+    codeActionLiteralSupport: {
+      codeActionKind: {
+        valueSet: [
+          "", // All code actions
+          "quickfix",
+          "quickfix.extractVariable",
+          "quickfix.extractFunction",
+          "refactor",
+          "refactor.extract",
+          "refactor.inline",
+          "refactor.rewrite",
+          "source",
+          "source.organizeImports",
+          "source.fixAll",
+          "source.sortImports",
+        ],
+      },
+    },
+    resolveSupport: {
+      properties: ["edit", "command", "documentation", "detail"],
+    },
+    dataSupport: true,
+    isPreferredSupport: true,
+    disabledSupport: true,
+    honorsChangeAnnotations: true,
   };
   textDocument.diagnostic = {
     ...textDocument.diagnostic,
     dynamicRegistration: true,
+  };
+
+  // Formatting capabilities
+  textDocument.formatting = {
+    ...textDocument.formatting,
+    dynamicRegistration: true,
+  };
+  textDocument.rangeFormatting = {
+    ...textDocument.rangeFormatting,
+    dynamicRegistration: true,
+  };
+
+  // Rename capabilities
+  textDocument.rename = {
+    ...textDocument.rename,
+    dynamicRegistration: true,
+    prepareSupport: true,
+    prepareSupportDefaultBehavior: 1, // Identifier
+    honorsChangeAnnotations: false,
   };
 
   // Window capabilities
@@ -513,6 +860,34 @@ function main(): void {
       // Patch initialize to advertise dynamic registration
       const patched = patchInitializeRequest(msg);
 
+      // Log requests for debugging
+      switch (msg.method) {
+        case "textDocument/completion":
+          logCompletionRequest(msg);
+          break;
+        case "completionItem/resolve":
+          logCompletionResolveRequest(msg);
+          break;
+        case "textDocument/formatting":
+          logFormattingRequest(msg);
+          break;
+        case "textDocument/rangeFormatting":
+          logRangeFormattingRequest(msg);
+          break;
+        case "textDocument/prepareRename":
+          logPrepareRenameRequest(msg);
+          break;
+        case "textDocument/rename":
+          logRenameRequest(msg);
+          break;
+        case "textDocument/codeAction":
+          logCodeActionRequest(msg);
+          break;
+        case "codeAction/resolve":
+          logCodeActionResolveRequest(msg);
+          break;
+      }
+
       // Forward to server
       serverProcess.stdin!.write(encodeMessage(patched));
     }
@@ -566,6 +941,32 @@ function main(): void {
         }
       }
 
+      // Log responses for tracked requests (completion, formatting, rename)
+      if ((msg.result !== undefined || msg.error !== undefined) && msg.id !== undefined) {
+        // Check if this is a response to a tracked completion request
+        const pending = pendingRequests.get(msg.id);
+        if (pending) {
+          if (pending.method === "textDocument/completion" || pending.method === "completionItem/resolve") {
+            logCompletionResponse(msg, pending);
+          } else if (pending.method === "textDocument/codeAction" || pending.method === "codeAction/resolve") {
+            logCodeActionResponse(msg, pending);
+          }
+          pendingRequests.delete(msg.id);
+        }
+
+        // Log successful formatting responses
+        if (msg.result && Array.isArray(msg.result)) {
+          const editsCount = msg.result.length;
+          if (editsCount > 0 && msg.result[0]?.range && msg.result[0]?.newText !== undefined) {
+            log("RESPONSE", `Formatting/rename response with ${editsCount} edit(s)`);
+          }
+        }
+        // Log error responses (if not already logged by completion handler)
+        if (msg.error && !pending) {
+          log("ERROR", `Response error: ${msg.error.code} - ${msg.error.message}`);
+        }
+      }
+
       // Forward everything else to Claude Code
       process.stdout.write(encodeMessage(msg));
     }
@@ -594,6 +995,276 @@ function main(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Setup CLI Command
+// ---------------------------------------------------------------------------
+
+interface SetupPaths {
+  pluginDir: string;
+  pluginJsonDir: string;
+  pluginJson: string;
+  lspJson: string;
+  marketplaceDir: string;
+  marketplaceJson: string;
+  claudeSettingsDir: string;
+  claudeSettings: string;
+}
+
+function getSetupPaths(): SetupPaths {
+  const homeDir = os.homedir();
+  const pluginDir = resolve(homeDir, ".claude/plugins/tailwind-lsp-adapter");
+  const pluginJsonDir = resolve(pluginDir, ".claude-plugin");
+  const marketplaceDir = resolve(homeDir, ".claude/plugins/.claude-plugin");
+  const claudeSettingsDir = resolve(homeDir, ".claude");
+
+  return {
+    pluginDir,
+    pluginJsonDir,
+    pluginJson: resolve(pluginJsonDir, "plugin.json"),
+    lspJson: resolve(pluginDir, ".lsp.json"),
+    marketplaceDir,
+    marketplaceJson: resolve(marketplaceDir, "marketplace.json"),
+    claudeSettingsDir,
+    claudeSettings: resolve(claudeSettingsDir, "settings.json"),
+  };
+}
+
+function ensureDirectory(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true, mode: 0o755 });
+    console.log(`  Created directory: ${dirPath}`);
+  }
+}
+
+function writeJsonFile(filePath: string, data: object, _description: string): void {
+  const content = JSON.stringify(data, null, 2) + "\n";
+  fs.writeFileSync(filePath, content, { encoding: "utf-8", mode: 0o644 });
+  console.log(`  Created/updated: ${filePath}`);
+}
+
+function createPluginJson(paths: SetupPaths): void {
+  console.log("\n[1/4] Creating plugin.json...");
+  ensureDirectory(paths.pluginJsonDir);
+
+  const pluginJson = {
+    name: "tailwind-lsp-adapter",
+    version: "1.0.0",
+    description: "Tailwind CSS LSP Adapter for Claude Code - provides intelligent CSS completions, hover info, and diagnostics",
+    author: "Tailwind LSP Adapter",
+    homepage: "https://github.com/tailwindlabs/tailwindcss-intellisense",
+    keywords: ["tailwind", "css", "lsp", "completion", "intellisense"],
+    license: "MIT",
+    engines: {
+      claude: ">=1.0.0",
+    },
+    contributes: {
+      lspServers: [
+        {
+          id: "tailwindcss",
+          name: "Tailwind CSS Language Server",
+          languages: ["css", "scss", "less", "html", "javascript", "javascriptreact", "typescript", "typescriptreact", "vue", "svelte"],
+        },
+      ],
+    },
+  };
+
+  writeJsonFile(paths.pluginJson, pluginJson, "plugin.json");
+}
+
+function createLspJson(paths: SetupPaths): void {
+  console.log("\n[2/4] Creating .lsp.json...");
+  ensureDirectory(paths.pluginDir);
+
+  const lspJson = {
+    servers: {
+      tailwindcss: {
+        command: "tailwind-lsp-adapter",
+        args: [],
+        filetypes: [
+          "css",
+          "scss",
+          "less",
+          "html",
+          "javascript",
+          "javascriptreact",
+          "typescript",
+          "typescriptreact",
+          "vue",
+          "svelte",
+        ],
+        rootPatterns: [
+          "tailwind.config.js",
+          "tailwind.config.ts",
+          "tailwind.config.cjs",
+          "tailwind.config.mjs",
+          "postcss.config.js",
+          "postcss.config.ts",
+          "postcss.config.cjs",
+          "postcss.config.mjs",
+          "package.json",
+        ],
+        initializationOptions: {},
+        settings: {
+          tailwindCSS: {
+            emmetCompletions: false,
+            classAttributes: ["class", "className", "ngClass"],
+            lint: {
+              cssConflict: "warning",
+              invalidApply: "error",
+              invalidScreen: "error",
+              invalidVariant: "error",
+              invalidConfigPath: "error",
+              invalidTailwindDirective: "error",
+              recommendedVariantOrder: "warning",
+            },
+            showPixelEquivalents: true,
+            rootFontSize: 16,
+          },
+        },
+      },
+    },
+  };
+
+  writeJsonFile(paths.lspJson, lspJson, ".lsp.json");
+}
+
+function createOrUpdateMarketplaceJson(paths: SetupPaths): void {
+  console.log("\n[3/4] Creating/updating marketplace.json...");
+  ensureDirectory(paths.marketplaceDir);
+
+  let marketplace: { plugins: Array<{ name: string; version: string; path: string; enabled: boolean }> } = {
+    plugins: [],
+  };
+
+  // Read existing marketplace.json if it exists
+  if (fs.existsSync(paths.marketplaceJson)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(paths.marketplaceJson, "utf-8"));
+      if (existing && Array.isArray(existing.plugins)) {
+        marketplace = existing;
+      }
+    } catch {
+      console.log("  Warning: Could not parse existing marketplace.json, creating new one");
+    }
+  }
+
+  // Check if tailwind-lsp-adapter is already registered
+  const existingIndex = marketplace.plugins.findIndex(
+    (p) => p.name === "tailwind-lsp-adapter"
+  );
+
+  const pluginEntry = {
+    name: "tailwind-lsp-adapter",
+    version: "1.0.0",
+    path: paths.pluginDir,
+    enabled: true,
+  };
+
+  if (existingIndex >= 0) {
+    marketplace.plugins[existingIndex] = pluginEntry;
+    console.log("  Updated existing tailwind-lsp-adapter entry");
+  } else {
+    marketplace.plugins.push(pluginEntry);
+    console.log("  Added tailwind-lsp-adapter to marketplace");
+  }
+
+  writeJsonFile(paths.marketplaceJson, marketplace, "marketplace.json");
+}
+
+function updateClaudeSettings(paths: SetupPaths): void {
+  console.log("\n[4/4] Updating Claude settings.json...");
+  ensureDirectory(paths.claudeSettingsDir);
+
+  let settings: Record<string, unknown> = {};
+
+  // Read existing settings.json if it exists
+  if (fs.existsSync(paths.claudeSettings)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(paths.claudeSettings, "utf-8"));
+    } catch {
+      console.log("  Warning: Could not parse existing settings.json, creating new one");
+      settings = {};
+    }
+  }
+
+  // Add or update extraKnownMarketplaces
+  const marketplaceName = "local-plugins";
+  const marketplacePath = resolve(os.homedir(), ".claude/plugins");
+
+  let extraMarketplaces = settings.extraKnownMarketplaces as Array<{ name: string; path: string }> | undefined;
+
+  if (!Array.isArray(extraMarketplaces)) {
+    extraMarketplaces = [];
+  }
+
+  // Check if local-plugins marketplace is already registered
+  const existingIndex = extraMarketplaces.findIndex(
+    (m) => m.name === marketplaceName
+  );
+
+  const marketplaceEntry = {
+    name: marketplaceName,
+    path: marketplacePath,
+  };
+
+  if (existingIndex >= 0) {
+    extraMarketplaces[existingIndex] = marketplaceEntry;
+    console.log("  Updated existing local-plugins marketplace entry");
+  } else {
+    extraMarketplaces.push(marketplaceEntry);
+    console.log("  Added local-plugins to extraKnownMarketplaces");
+  }
+
+  settings.extraKnownMarketplaces = extraMarketplaces;
+  writeJsonFile(paths.claudeSettings, settings, "settings.json");
+}
+
+function printInstructions(): void {
+  console.log("\n" + "=".repeat(60));
+  console.log("Setup Complete!");
+  console.log("=".repeat(60));
+  console.log("\nNext steps:");
+  console.log("\n1. Enable LSP tools in Claude Code by setting the environment variable:");
+  console.log("   export ENABLE_LSP_TOOL=1");
+  console.log("\n   Or add it to your shell profile (~/.bashrc, ~/.zshrc, etc.):");
+  console.log("   echo 'export ENABLE_LSP_TOOL=1' >> ~/.zshrc");
+  console.log("\n2. Restart Claude Code to pick up the settings changes.");
+  console.log("\n3. In Claude Code, install the plugin:");
+  console.log("   /plugin install tailwind-lsp-adapter@local-plugins");
+  console.log("\n4. Ensure @tailwindcss/language-server is installed globally:");
+  console.log("   npm install -g @tailwindcss/language-server");
+  console.log("\n5. (Optional) For debug logging, set:");
+  console.log("   export LSP_ADAPTER_DEBUG=1");
+  console.log("\n" + "=".repeat(60));
+}
+
+function runSetup(): void {
+  console.log("Tailwind LSP Adapter - Setup");
+  console.log("============================");
+  console.log("\nThis will configure Claude Code to use the Tailwind LSP Adapter.");
+
+  const paths = getSetupPaths();
+
+  try {
+    createPluginJson(paths);
+    createLspJson(paths);
+    createOrUpdateMarketplaceJson(paths);
+    updateClaudeSettings(paths);
+    printInstructions();
+    process.exit(0);
+  } catch (err) {
+    console.error("\nSetup failed:", err instanceof Error ? err.message : String(err));
+    console.error("\nPlease check file permissions and try again.");
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
-main();
+
+// Check for --setup flag before starting the LSP adapter
+if (process.argv.includes("--setup")) {
+  runSetup();
+} else {
+  main();
+}
