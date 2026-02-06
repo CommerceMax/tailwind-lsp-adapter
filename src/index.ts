@@ -1186,34 +1186,31 @@ function updateClaudeSettings(paths: SetupPaths): void {
     }
   }
 
-  // Add or update extraKnownMarketplaces
+  // Add or update extraKnownMarketplaces (must be a record, not an array)
   const marketplaceName = "local-plugins";
   const marketplacePath = resolve(os.homedir(), ".claude/plugins");
 
-  let extraMarketplaces = settings.extraKnownMarketplaces as Array<{ name: string; path: string }> | undefined;
+  // Ensure extraKnownMarketplaces is an object (not array)
+  let extraMarketplaces = settings.extraKnownMarketplaces as Record<string, unknown> | undefined;
 
-  if (!Array.isArray(extraMarketplaces)) {
-    extraMarketplaces = [];
+  if (!extraMarketplaces || typeof extraMarketplaces !== "object" || Array.isArray(extraMarketplaces)) {
+    extraMarketplaces = {};
   }
 
-  // Check if local-plugins marketplace is already registered
-  const existingIndex = extraMarketplaces.findIndex(
-    (m) => m.name === marketplaceName
-  );
-
   const marketplaceEntry = {
-    name: marketplaceName,
-    path: marketplacePath,
+    source: {
+      source: "directory",
+      path: marketplacePath,
+    },
   };
 
-  if (existingIndex >= 0) {
-    extraMarketplaces[existingIndex] = marketplaceEntry;
+  if (extraMarketplaces[marketplaceName]) {
     console.log("  Updated existing local-plugins marketplace entry");
   } else {
-    extraMarketplaces.push(marketplaceEntry);
     console.log("  Added local-plugins to extraKnownMarketplaces");
   }
 
+  extraMarketplaces[marketplaceName] = marketplaceEntry;
   settings.extraKnownMarketplaces = extraMarketplaces;
   writeJsonFile(paths.claudeSettings, settings, "settings.json");
 }
